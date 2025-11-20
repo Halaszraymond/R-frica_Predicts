@@ -47,3 +47,25 @@ po/*~
 
 # RStudio Connect folder
 rsconnect/
+
+# Data files
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+
+# Model files
+models/*
+!models/.gitkeep
+
+# Output files
+outputs/*
+plots/*
+!outputs/.gitkeep
+!plots/.gitkeep
+
+# Kaggle credentials
+credentials/*
+kaggle.json
+.kaggle/
+!credentials/.gitkeep
