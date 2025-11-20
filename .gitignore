@@ -47,3 +47,16 @@ po/*~
 
 # RStudio Connect folder
 rsconnect/
+
+# Data files (keep directory structure but ignore large data files)
+data/raw/*.csv
+data/processed/*.csv
+
+# Model files (ignore trained models as they can be regenerated)
+models/*.rds
+
+# Output files (ignore generated outputs)
+outputs/plots/*.png
+outputs/plots/*.jpg
+outputs/*.csv
+outputs/predictions/*.csv
