@@ -73,7 +73,7 @@ source("scripts/scrape_matches.R")
 
 | Dataset                             | Description                                                                                 | Link                                                                       |
 | ----------------------------------- | ------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| African national football from 2010-2024 | up-to-date dataset of over 8,000 African nations football results | [Kaggle]((https://www.kaggle.com/datasets/oussamalariouch/african-national-football-from-2010-2024))        |
+| African national football from 2010-2024 | up-to-date dataset of over 8,000 African nations football results | [Kaggle](https://www.kaggle.com/datasets/oussamalariouch/african-national-football-from-2010-2024)        |
 | AFCON Countries Matches (2000–2025) | Full dataset created by scraping National Football Teams for matches of all AFCON countries | [National Football Teams](https://www.national-football-teams.com/)        |
 | FIFA World Ranking (1992–2024)      | Historical FIFA rankings                                                                    | [Kaggle](https://www.kaggle.com/datasets/cashncarry/fifaworldranking/code) |
 
