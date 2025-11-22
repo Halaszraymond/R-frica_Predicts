@@ -141,5 +141,5 @@ all_matches |>
 # We have 7 columns (Including the index column) and +8000 rows, this seems like enough data
 
 # Lets save all matches to "afcon_country_matches_2000-2025.csv"
-write_csv(african_afcon_matches, "data/afcon_country_matches_2000-2025.csv")
+write_csv(all_matches, "data/afcon_country_matches_2000-2025.csv")
 
