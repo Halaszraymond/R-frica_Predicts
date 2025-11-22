@@ -73,8 +73,20 @@ scrape_matches_per_country <- function(country, id, year){
       scores <- str_split(result, ":", simplify = TRUE)
       home_score <- as.numeric(scores[1])
       away_score <- as.numeric(scores[2])
+      if (is.na(away_score)) {
+        score_node <- row %>% html_node(".result span[title^='Result']")
+        
+        
+        title_text <- html_attr(score_node, "title")
+        # Extract the "x:y" pattern from title
+        title_scores <- str_extract(title_text, "\\d+:\\d+")
+        scores <- str_split(title_scores, ":", simplify = TRUE)
+        
+        home_score <- as.numeric(scores[1])
+        away_score <- as.numeric(scores[2])
+      }
       
-      # Extract tournament (everything before first "-")
+      # Extract tournament (if its empty then its considered to be a friendly match)
       tournament <- ifelse(
         is.na(tournament) | tournament == "",
         "Friendly",
@@ -118,7 +130,7 @@ for (country in names(country_dict)) {
         scrape_matches_per_country(country, id, year)
       },
       error = function(e) {
-        message(glue("Skipping {country} {year} (page not found)"))
+        message(glue("Skipping {country} {year} (page not found), error: {e}"))
         return(NULL)
       }
     )
