@@ -1,100 +1,130 @@
+## ==============================
+## 01_load_and_filter_africa_results.R
+## - Load the original African nations results dataset
+## - Explore structure, cleanliness, and completeness of the data
+## - Convert columns to correct data types (date handling)
+## - Identify AFCON 2025–relevant teams
+## - Filter dataset to only matches involving AFCON 2025 nations
+## - Save filtered dataset for downstream scraping and modeling
+## ==============================
+
 # R-frica Predicts
 ## Script by Chadwa Khmissi and Raymond Visser
 
-
-
-# Libary imports
+# ----------------------------------------------------------
+# Library imports
+# ----------------------------------------------------------
 library(readr)
 library(tidyverse)
+library(lubridate)   # mdy() for date conversion
 
+# ----------------------------------------------------------
+# 1. Load and inspect the African nations results dataset
+# ----------------------------------------------------------
 
-# Lets load and explore the African nations results
+# This dataset contains historical match results for many countries,
+# not only African nations. We will inspect it and then filter it
+# down to AFCON-relevant teams.
 african_nations_results <- read_csv("data/african-nations-results.csv")
 
-# Lets check the first 6 rows
-african_nations_results |> 
-  head()
-# Data looks clean, but lets check the other characteristics aswell
+# Preview first few rows to verify structure
+african_nations_results |> head()
 
-# Lets check the dimension
+# Check dataset size (rows & columns)
 african_nations_results |> 
   summarize(rows = n(), columns = ncol(across()))
-# We have 7 columns (Including the index column) and +8000 rows, this seems like enough data
+# Expectation: ~8,000 rows and 7 useful columns
 
-# Lets check the datatypes and columns 
-african_nations_results |> 
-  glimpse()
-# We have 4 character columns and 2 "double"
-# We should change the "date" column to datetime
+# Check column types and structure
+african_nations_results |> glimpse()
+# 'date' is currently a character column → must convert to Date
+
+# ----------------------------------------------------------
+# 2. Convert date column to proper Date format
+# ----------------------------------------------------------
 
 african_nations_results <- african_nations_results |> 
   mutate(
-    date = mdy(date),
-    date= format(date, "%d/%m/%Y"))
+    date = mdy(date),                     # convert "MM/DD/YYYY" → Date
+    date = format(date, "%d/%m/%Y")       # reformat as "DD/MM/YYYY"
+  )
 
-# Lets check the datatypes and columns again... 
-african_nations_results |> 
-  glimpse()
-# Now date is in the correct format
+# Verify type changes
+african_nations_results |> glimpse()
 
-# Lets check column specifications:
+# ----------------------------------------------------------
+# 3. Explore key variables and check data quality
+# ----------------------------------------------------------
+
+# Summary statistics for numeric variables
 summary(african_nations_results)
-# Only the home_score and away_score are relevant here since they're the only numerical variables
-# We can see that the mean values are respectively 1.54 and 1.02. This makes sense because we expect home teams to make more goals than away teams
+# Home teams average ~1.5 goals, away teams ~1.0 goals → reasonable
 
-# Now lets check the NA per column
+# Check missing values per column
 colSums(is.na(african_nations_results))
-# Nice, we dont have any Null values
+# No missing values → dataset is clean
 
-# Lets not check the newest matches to see if all is complete
+# Inspect newest matches (sorted by date)
 african_nations_results |> 
   arrange(date) |> 
   tail()
-# Last added match is Morocco against Sierra Leon on 2024-01-11...
-# Let's try to find the data from 2024 and 2025 to make better predictions
+# Last match recorded is from early 2024 → missing 2024–2025 matches
 
+# Show object class for debugging/confirmation
 class(african_nations_results)
 
-# Lets check which countries we should filter on
+# ----------------------------------------------------------
+# 4. Explore unique countries & tournaments in the dataset
+# ----------------------------------------------------------
+
+# List all countries that appear in any match
 distinct_countries <- african_nations_results %>% 
   dplyr::select(home_team, away_team) %>% 
   pivot_longer(everything(), values_to = "country") %>% 
   distinct(country)
 
-
-
-# Lets check which countries we should filter on
-distinct_tournament <- african_nations_results |> 
+# List all tournaments present in the dataset
+distinct_tournaments <- african_nations_results |> 
   dplyr::select(tournament) |> 
   pivot_longer(everything(), values_to = "tournament") |> 
   distinct(tournament)
 
-distinct_tournament
+distinct_tournaments
 
-# It looks like we have way more countries than only the African ones...
-# Let's filter on countries where either the home country or away country participates in AFCON 2025
+# Observation:
+# Dataset contains many non-African teams → we will filter next.
 
+# ----------------------------------------------------------
+# 5. Filter dataset to AFCON 2025 teams only
+# ----------------------------------------------------------
+
+# AFCON 2025 participating nations (24 teams)
 afcon_2025_teams <- c(
   "Morocco", "Burkina Faso", "Cameroon", "Algeria", "DR Congo", "Senegal",
-  "Egypt", "Angola", "Equatorial Guinea", "Cote d’Ivoire", "Uganda", "South Africa",
-  "Gabon", "Tunisia", "Nigeria", "Zambia", "Mali", "Zimbabwe", "Comoros",
-  "Sudan", "Benin", "Tanzania", "Botswana", "Mozambique"
+  "Egypt", "Angola", "Equatorial Guinea", "Cote d’Ivoire", "Uganda",
+  "South Africa", "Gabon", "Tunisia", "Nigeria", "Zambia", "Mali",
+  "Zimbabwe", "Comoros", "Sudan", "Benin", "Tanzania", "Botswana",
+  "Mozambique"
 )
 
+# Keep only matches where either team is an AFCON 2025 participant
 african_afcon_matches <- african_nations_results |> 
   filter(
-    home_team %in% afcon_2025_teams | away_team %in% afcon_2025_teams
+    home_team %in% afcon_2025_teams |
+      away_team %in% afcon_2025_teams
   )
 
 african_afcon_matches
-# We have a huge loss of matches unfortunately we went from +8000 to +2000
+# Match count drops from ~8000 to ~2000 → original dataset lacks
+# recent AFCON-team matches, especially in 2024–2025.
 
+# ----------------------------------------------------------
+# 6. Save filtered dataset for further enrichment (scraping)
+# ----------------------------------------------------------
 
-# Next we are going to scrape: https://www.national-football-teams.com/matches
-# See file: 02-Scraping-2024-2025
-
-# Lets save "african_afcon_matches"
+# This CSV will be combined with scraped 2024–2025 matches
+# in the next script (02_scraping_2000_2025.R).
 write_csv(african_afcon_matches, "data/african_afcon_matches.csv")
 
-
+print("Analyzing Africa matches: Done")
 

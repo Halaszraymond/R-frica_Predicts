@@ -1,97 +1,61 @@
-# R-frica Predicts
+# R-frica Predicts – AFCON 2025 Simulation Project
 
-R-frica Predicts is an R-based project focused on analyzing African national football matches and predicting outcomes for AFCON 2025. The project uses historical match data and FIFA rankings to build reproducible workflows, generate insights, and produce predictive models.
-
----
-
-## 🔹 Key Features
-
-* Collects and cleans African football match data from 2000–2025 for AFCON countries using a custom web scraping script from [National Football Teams](https://www.national-football-teams.com/)
-* Extracts FIFA World Rankings (1992–2024) for feature engineering
-* Performs exploratory data analysis (EDA) to identify patterns and trends
-* Builds predictive models for match outcomes and tournament winner simulations
-* Generates visualizations for team performance and tournament analysis
+**Authors:**  
+- **Chadwa Khmissi (HQQ4WD)**  
+- **Raymond Visser (B7INGB)**  
 
 ---
 
-## 📁 Project Structure
+## 📘 Project Description
 
-```
-R-frica_Predicts/
-├── data/        # Raw and processed datasets
-├── scripts/     # R scripts for scraping, cleaning, and analysis
-├── models/      # Predictive models and outputs
-├── plots/       # Generated visualizations
-└── README.md    # Project documentation
-```
+R-frica Predicts is an R-based pipeline developed to simulate the **AFCON 2025** football tournament.  
+The project uses:
+
+- Historical African international match results  
+- FIFA monthly rankings  
+- Engineered statistical features  
+- Machine-learning models (Random Forest + Multinomial Logistic Regression)
+
+The pipeline generates:
+
+- Group stage standings  
+- Knockout bracket prediction  
+- Simulated tournament champion  
+- A final combined visualization saved as a PNG  
+
+All necessary data is already included in the `data/` directory.  
+Web scraping is optional and **not required** to reproduce results.
 
 ---
 
-## 📊 Getting Started
+## 📂 Project Structure
+R-frica-Predicts/
+├── data/ # Prepared datasets (already provided)
+├── models/ # Saved machine-learning models
+├── results/ # Simulation output (RDS file)
+├── plots/ # Final tournament prediction plot
+├── scripts/ # All scripts used in the pipeline (01–07)
+└── 00_main.R # Master script that runs the entire pipeline
 
-### Installation
 
-Install required R packages:
+---
+
+## 🚀 Running the Full Pipeline
+
+To execute the complete workflow, open RStudio and run:
 
 ```r
-install.packages(c("tidyverse", "rvest", "glue", "stringr", "readr"))
-```
+source("00_main.R")
 
-### Usage
+This will automatically perform:
+    - Data loading
+    - Feature engineering
+    - Model training
+    - Tournament simulation
+    - Final visualization creation
 
-Load cleaned datasets and start analysis:
 
-```r
-library(tidyverse)
-af_data <- read_csv("data/afcon_matches_2000_2025.csv")
-```
+The predicted AFCON 2025 tournament bracket will be saved in:
+    - plots/afcon_2025_prediction.png
 
-Run scraping and data preparation scripts as needed:
-
-```r
-source("scripts/scrape_matches.R")
-```
-
----
-
-## 📈 Predictive Modeling
-
-* Models include logistic regression, random forests, and ranking-based simulations
-* Goal: predict match results and tournament outcomes for AFCON 2025
-* Outputs saved in `/models`
-
----
-
-## 📊 Visualizations
-
-* Uses `ggplot2` to generate plots of team performance, scoring trends, and tournament simulations
-* Plots are stored in `/plots`
-
----
-
-## 📋 Data Sources
-
-| Dataset                             | Description                                                                                 | Link                                                                       |
-| ----------------------------------- | ------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| African national football from 2010-2024 | up-to-date dataset of over 8,000 African nations football results | [Kaggle](https://www.kaggle.com/datasets/oussamalariouch/african-national-football-from-2010-2024)        |
-| AFCON Countries Matches (2000–2025) | Full dataset created by scraping National Football Teams for matches of all AFCON countries | [National Football Teams](https://www.national-football-teams.com/)        |
-| FIFA World Ranking (1992–2024)      | Historical FIFA rankings                                                                    | [Kaggle](https://www.kaggle.com/datasets/cashncarry/fifaworldranking/code) |
-
----
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a new branch
-3. Submit a pull request
-
----
-
-## 📬 Contact
-
-For questions or suggestions, please create an issue in the GitHub repository.
-
----
-
-**R-frica Predicts — Turning African football data into actionable insights.**
 
