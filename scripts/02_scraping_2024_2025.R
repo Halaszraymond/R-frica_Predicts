@@ -36,6 +36,10 @@ country_dict <- c(
   "Botswana" = 27,
   "Mozambique" = 126
 )
+
+# This function scrapes the data from 'national-football-teams.com'
+# We chose to scrape by country instead of tournament because the website lists all matches per country
+# This way we can loop through the country list per year instead of searching the data through all tournaments
 scrape_matches_per_country <- function(country, id, year){
   # URL of the page (or local HTML)
   url <- glue("https://www.national-football-teams.com/country/{id}/{year}/{country}.html")
