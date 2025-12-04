@@ -53,17 +53,19 @@ african_nations_results |>
 # Last added match is Morocco against Sierra Leon on 2024-01-11...
 # Let's try to find the data from 2024 and 2025 to make better predictions
 
+class(african_nations_results)
+
 # Lets check which countries we should filter on
-distinct_countries <- african_nations_results |> 
-  select(home_team, away_team) |> 
-  pivot_longer(everything(), values_to = "country") |> 
+distinct_countries <- african_nations_results %>% 
+  dplyr::select(home_team, away_team) %>% 
+  pivot_longer(everything(), values_to = "country") %>% 
   distinct(country)
 
-distinct_countries
+
 
 # Lets check which countries we should filter on
 distinct_tournament <- african_nations_results |> 
-  select(tournament) |> 
+  dplyr::select(tournament) |> 
   pivot_longer(everything(), values_to = "tournament") |> 
   distinct(tournament)
 
