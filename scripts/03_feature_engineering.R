@@ -2,7 +2,7 @@
 ## 03_feature_engineering.R
 ## - Load raw data
 ## - Join FIFA rankings
-## - Engineer features
+## - Engineer features (incl. head-to-head)
 ## - Save model_data for modeling.R
 ## ==============================
 
@@ -26,30 +26,21 @@ ranks <- read_csv("data/fifa_monthly_rankings.csv",
                   show_col_types = FALSE) |>
   mutate(rank_date = as.Date(rank_date))  # ensure 'rank_date' is Date
 
-# Quick data checks --------------------------------------------------
-# These help verify that the data loaded correctly and give you
-# a feel for structure and distributions. They are mainly for
-# exploration; they don't affect the final model_data.
+# ---------- Quick data checks (exploratory, optional) ----------
 
-# Overview of variables and types in matches
 glimpse(matches)
-
-# Basic summary statistics (for numeric columns mostly)
 summary(matches)
 
-# Top 20 tournaments by number of matches
-matches |> 
-  count(tournament, sort = TRUE) |> 
+matches |>
+  count(tournament, sort = TRUE) |>
   head(20)
 
-# Distribution of total goals in a match
-matches |> 
+matches |>
   mutate(total_goals = home_score + away_score) |>
   ggplot(aes(total_goals)) +
   geom_histogram(binwidth = 1) +
   labs(title = "Total goals per match", x = "Goals", y = "Count")
 
-# Time trend of number of matches per year
 matches |>
   mutate(year = year(date)) |>
   count(year) |>
@@ -57,25 +48,18 @@ matches |>
   geom_line() +
   labs(title = "Number of matches by year")
 
-# AFCON-related subsets (optional exploration) -----------------------
-
-# Matches where the tournament name contains "African"
-# (rough proxy for AFCON-related competitions).
+# AFCON-related subsets (just for exploration)
 matches_africa <- matches |>
   filter(str_detect(tournament, "African"))
 
-# More specific subset: AFCON matches that look like final
-# tournament games (e.g. Group, Round, Quarter, Semi, Final)
 matches_afcon_finals <- matches |>
   filter(str_detect(tournament, "African") &
            str_detect(tournament, "Group|Round|Quarter|Semi|Final"))
 
-# Count AFCON final-tournament-type matches by year
 matches_afcon_finals |>
   mutate(year = year(date)) |>
   count(year, sort = TRUE)
 
-# Goal difference distribution for AFCON finals matches
 matches_afcon_finals |>
   mutate(goal_diff = home_score - away_score) |>
   ggplot(aes(goal_diff)) +
@@ -125,15 +109,83 @@ matches_ranked <- sqldf("
 # Back to tibble for tidyverse convenience
 matches_ranked <- as_tibble(matches_ranked)
 
-# ---------- Feature engineering ----------
+# ---------- Head-to-head features (per pair, before each match) ----------
 
-# Here we:
-#  - Drop matches with missing ranking info
-#  - Create the target 'result' (H/D/A)
-#  - Build ranking-based features (rank_diff, points_diff)
-#  - Create tournament-type flags (AFCON final, qualifier, friendly)
-#  - Add temporal features (year, month)
-matches_model <- matches_ranked |>
+# We compute cumulative head-to-head history for each unordered pair of teams.
+# Then we lag those cumulative stats so that for each match, the features
+# only reflect matches BEFORE that match date (no data leakage).
+
+matches_h2h <- matches_ranked |>
+  mutate(
+    # Unordered pair id for the two teams (same for A vs B and B vs A)
+    team_low  = pmin(home_team, away_team),
+    team_high = pmax(home_team, away_team),
+    pair_id   = paste(team_low, team_high, sep = " - "),
+    
+    # From the perspective of team_low (so we have a consistent side)
+    low_goal_diff = case_when(
+      home_team == team_low ~ home_score - away_score,       # low is home
+      TRUE                  ~ away_score - home_score        # low is away
+    ),
+    low_result_num = case_when(
+      home_score == away_score ~ 0,                          # draw
+      # low team wins
+      (home_team == team_low & home_score > away_score) |
+        (away_team == team_low & away_score > home_score) ~ 1,
+      TRUE ~ -1                                              # low team loses
+    )
+  ) |>
+  arrange(pair_id, date) |>
+  group_by(pair_id) |>
+  mutate(
+    # cumulative stats for team_low up to and including each match
+    c_matches_low    = row_number(),
+    c_goal_diff_low  = cumsum(low_goal_diff),
+    c_result_sum_low = cumsum(low_result_num),
+    
+    # shift by one match so features are based only on history
+    h2h_matches_before_low    = lag(c_matches_low,    default = 0L),
+    h2h_goal_diff_before_low  = lag(c_goal_diff_low,  default = 0),
+    h2h_result_sum_before_low = lag(c_result_sum_low, default = 0),
+    
+    # transform to HOME-team perspective
+    h2h_matches_before_home = h2h_matches_before_low,
+    h2h_goal_diff_before_home = if_else(
+      home_team == team_low,
+      h2h_goal_diff_before_low,     # low is home → same sign
+      -h2h_goal_diff_before_low     # low is away → flip sign
+    ),
+    h2h_result_sum_before_home = if_else(
+      home_team == team_low,
+      h2h_result_sum_before_low,
+      -h2h_result_sum_before_low
+    ),
+    
+    # Approximate home head-to-head win rate:
+    # result_sum = wins - losses (draws = 0).
+    # (wins - losses + matches) / (2 * matches) is between 0 and 1.
+    h2h_home_winrate_before = if_else(
+      h2h_matches_before_home > 0,
+      (h2h_result_sum_before_home + h2h_matches_before_home) /
+        (2 * h2h_matches_before_home),
+      NA_real_
+    )
+  ) |>
+  ungroup()
+
+# Optional: replace NA head-to-head winrate (no prior meetings) with neutral 0.5
+matches_h2h <- matches_h2h |>
+  mutate(
+    h2h_home_winrate_before = if_else(
+      is.na(h2h_home_winrate_before),
+      0.5,  # neutral: no advantage from H2H history
+      h2h_home_winrate_before
+    )
+  )
+
+# ---------- Feature engineering (final match-level dataset) ----------
+
+matches_model <- matches_h2h |>
   # Keep only matches where both teams have ranking information
   filter(!is.na(home_rank), !is.na(away_rank)) |>
   mutate(
@@ -146,11 +198,9 @@ matches_model <- matches_ranked |>
       home_score == away_score ~ "D",
       TRUE ~ "A"
     ),
-    # Explicitly set factor levels so the order is well-defined
     result = factor(result, levels = c("H", "D", "A")),
     
     # ----- Ranking features -----
-    
     # Difference in rank: away_rank - home_rank
     # Positive value: away team is "worse" ranked (higher numeric rank)
     # Negative value: away team is "better" ranked (lower numeric rank)
@@ -161,20 +211,11 @@ matches_model <- matches_ranked |>
     points_diff = home_points - away_points,
     
     # ----- Tournament flags -----
-    #
-    # These are simple string-based indicators based on the
-    # 'tournament' column. You can later refine the patterns
-    # if you have more precise tournament names.
-    
-    # AFCON final-tournament-type match:
-    #  - Contains "African" (African Cup of Nations)
-    #  - And a stage keyword like Group/Round/Quarter/Semi/Final
-    is_afcon   = str_detect(tournament, "African") &
+    is_afcon = str_detect(tournament, "African") &
       str_detect(tournament, "Group|Round|Quarter|Semi|Final"),
     
-    # AFCON qualifier (intended as separate from main AFCON finals)
-    # This is a rough pattern based on name; adjust as needed.
-    is_qual    = str_detect(tournament, "African") &
+    # AFCON qualifiers (rough pattern; can be refined)
+    is_qual = str_detect(tournament, "African") &
       str_detect(tournament, "Group") &
       !is_afcon,
     
@@ -186,12 +227,15 @@ matches_model <- matches_ranked |>
     month = month(date)
   )
 
+# ---------- Final model_data selection ----------
+
 # This is the dataset we will use for modeling.
-# Only keep the variables that are needed for the model:
-#  - result: target
-#  - rank_diff, points_diff: strength differences
+# One row per match with:
+#  - result: outcome (H/D/A)
+#  - rank_diff, points_diff: ranking-based strength differences
 #  - is_afcon, is_qual, is_friendly: match type
 #  - year: time (used for train/test split)
+#  - h2h_*: head-to-head stats from home team perspective
 model_data <- matches_model |>
   dplyr::select(
     result,
@@ -200,22 +244,22 @@ model_data <- matches_model |>
     is_afcon,
     is_qual,
     is_friendly,
-    year
+    year,
+    h2h_matches_before_home,
+    h2h_goal_diff_before_home,
+    h2h_home_winrate_before
   )
 
 # ---------- Save engineered data for modeling ----------
 
-# Save as RDS so:
-#  - factors/classes are preserved
-#  - it's easy to load in modeling.R via readRDS()
 saveRDS(model_data, "data/model_data.rds")
 
 # Optional: keep 'ranks' in memory for later scripts (like simulation.R),
 # where we need the FIFA rankings by country and date.
-# (If all scripts are run in the same R session, this is handy.)
 ranks <- ranks  # no-op, just to emphasize 'ranks' is meant to stay available
 
 # Quick look to confirm the engineered data looks reasonable
-head(model_data)
+print(head(model_data))
 
 print("Feature Engineering: Done")
+

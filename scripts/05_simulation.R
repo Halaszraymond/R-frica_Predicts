@@ -8,81 +8,122 @@
 ##
 ## Uses:
 ## - rf_model.rds  (pre-trained Random Forest from models/)
-## - ranks         (FIFA rankings from feature_engineer.R; must be
+## - ranks         (FIFA rankings from feature_engineering.R; must be
 ##                  available in the environment as a data frame)
+## - data/afcon_country_matches_2000-2025.csv
+##   (for head-to-head summaries)
 ##
 ## This script:
 ##  1. Loads the trained Random Forest model used to predict match outcomes
-##  2. Defines AFCON 2025 groups (or accepts custom groups)
-##  3. Uses the latest FIFA rankings to build features for each matchup
-##  4. Simulates:
+##  2. Builds a head-to-head summary table from historical matches
+##  3. Defines AFCON 2025 groups (or accepts custom groups)
+##  4. Uses the latest FIFA rankings + H2H data to build features
+##  5. Simulates:
 ##      - Group stage (round-robin)
 ##      - Qualification of top 2 + best 4 third-placed teams
-##      - Knockout rounds (R16 → QF → SF → Final)
-##  5. Returns a detailed result object and saves it to results/
+##      - Knockout rounds (R16 -> QF -> SF -> Final)
+##  6. Returns a detailed result object and saves it to results/
 
 library(dplyr)
 library(lubridate)
 library(tibble)
 library(stringr)
 library(randomForest)  # for predict.randomForest
+library(readr)
 
 # ---------- Ensure results/ folder exists ----------
 
-# We store simulation output (res object) as an .rds file here.
-# If the folder doesn't exist yet, create it.
 if (!dir.exists("results")) {
   dir.create("results", recursive = TRUE)
 }
 
 # ---------- Load Random Forest model from models/ ----------
 
-# The model was trained in modeling.R and saved as "models/rf_model.rds".
-# It predicts the outcome of a match (H/D/A) from engineered features.
 rf_fit <- readRDS("models/rf_model.rds")
+
+# ---------- Build head-to-head summary from historical matches ----------
+
+# We use the same raw match file as in feature engineering
+matches_hist <- read_csv("data/afcon_country_matches_2000-2025.csv",
+                         show_col_types = FALSE) |>
+  mutate(date = as.Date(date))
+
+# For each unordered pair of teams (team_low, team_high), compute:
+#  - total number of matches
+#  - total goal difference from team_low perspective
+#  - total result sum from team_low perspective (win=1, draw=0, loss=-1)
+h2h_summary <- matches_hist |>
+  mutate(
+    team_low  = pmin(home_team, away_team),
+    team_high = pmax(home_team, away_team),
+    low_goal_diff = case_when(
+      home_team == team_low ~ home_score - away_score,
+      TRUE                  ~ away_score - home_score
+    ),
+    low_result_num = case_when(
+      home_score == away_score ~ 0,
+      (home_team == team_low & home_score > away_score) |
+        (away_team == team_low & away_score > home_score) ~ 1,
+      TRUE ~ -1
+    )
+  ) |>
+  group_by(team_low, team_high) |>
+  summarise(
+    h2h_matches_total       = n(),
+    h2h_goal_diff_low_total = sum(low_goal_diff, na.rm = TRUE),
+    h2h_result_sum_low_total = sum(low_result_num, na.rm = TRUE),
+    .groups = "drop"
+  )
 
 # Name map for FIFA rankings
 # --------------------------
-# Some country names in the AFCON context differ from how they appear
-# in the FIFA rankings data (ranks_df$country_full). This map allows
-# us to translate AFCON team names to their corresponding FIFA names.
 name_map <- c(
   "DR Congo"    = "Congo DR",
   "Ivory Coast" = "Côte d'Ivoire"
 )
 
 # -------------------------------------------------------------------
+# Helper: get head-to-head features for a pair (home, away)
+# -------------------------------------------------------------------
+get_h2h_features <- function(home_team, away_team) {
+  tl <- pmin(home_team, away_team)
+  th <- pmax(home_team, away_team)
+  
+  rec <- h2h_summary |>
+    filter(team_low == tl, team_high == th)
+  
+  if (nrow(rec) == 0) {
+    # No previous meetings: neutral H2H
+    matches_before_home <- 0
+    goal_diff_before_home <- 0
+    winrate_before <- 0.5
+  } else {
+    matches_before_home <- rec$h2h_matches_total[1]
+    goal_diff_low_total <- rec$h2h_goal_diff_low_total[1]
+    result_sum_low_total <- rec$h2h_result_sum_low_total[1]
+    
+    # Convert from team_low perspective to HOME team perspective
+    if (home_team == tl) {
+      goal_diff_before_home <- goal_diff_low_total
+      result_sum_before_home <- result_sum_low_total
+    } else {
+      goal_diff_before_home <- -goal_diff_low_total
+      result_sum_before_home <- -result_sum_low_total
+    }
+    
+    winrate_before <- (result_sum_before_home + matches_before_home) /
+      (2 * matches_before_home)
+  }
+  
+  list(
+    h2h_matches_before_home = matches_before_home,
+    h2h_goal_diff_before_home = goal_diff_before_home,
+    h2h_home_winrate_before = winrate_before
+  )
+}
+
+# -------------------------------------------------------------------
 # simulate_afcon_2025()
-#
-# Main function to simulate the AFCON 2025 tournament.
-#
-# Arguments:
-#   model         : fitted classification model with predict(type = "prob"),
-#                   default is the RF loaded above (rf_fit)
-#   ranks_df      : data frame with FIFA rankings, must contain:
-#                     - country_full
-#                     - rank
-#                     - total_points
-#                     - rank_date
-#   afcon_groups  : named list of groups (A–F), each with 4 teams. If NULL,
-#                   a default AFCON 2025 group setup is used.
-#   year_for_model: numeric year to set in the feature 'year' for predictions
-#   seed          : optional seed for reproducibility of the tournament draw
-#   return_details: if TRUE, returns a list with champion and full details;
-#                   if FALSE, returns only the champion (team name)
-#
-# Returns:
-#   Either:
-#   - champion (character), if return_details = FALSE
-#   - list with:
-#       champion
-#       final_pair
-#       semi_finalists
-#       quarter_finalists
-#       r16_winners
-#       group_results
-#       knockout_seeding
-#       round_of_16_pairs
 # -------------------------------------------------------------------
 
 simulate_afcon_2025 <- function(model        = rf_fit,
@@ -95,7 +136,6 @@ simulate_afcon_2025 <- function(model        = rf_fit,
   if (!is.null(seed)) set.seed(seed)
   
   # 1. Default groups ------------------------------------------------
-  # If no custom groups are supplied, use a default AFCON 2025 layout.
   if (is.null(afcon_groups)) {
     afcon_groups <- list(
       A = c("Morocco", "Mali", "Zambia", "Comoros"),
@@ -107,7 +147,6 @@ simulate_afcon_2025 <- function(model        = rf_fit,
     )
   }
   
-  # Group size sanity check: each group must have at least 2 teams.
   group_sizes <- vapply(afcon_groups, length, integer(1))
   if (any(group_sizes < 2)) {
     bad <- names(afcon_groups)[group_sizes < 2]
@@ -117,9 +156,6 @@ simulate_afcon_2025 <- function(model        = rf_fit,
   }
   
   # 2. Latest FIFA ranking snapshot ---------------------------------
-  # We use a *single* ranking snapshot: the most recent rank_date
-  # available in ranks_df. This serves as the "current strength" of
-  # each team going into the tournament.
   ranks_df$rank_date <- as.Date(ranks_df$rank_date)
   latest_rank_date <- max(ranks_df$rank_date, na.rm = TRUE)
   
@@ -127,11 +163,9 @@ simulate_afcon_2025 <- function(model        = rf_fit,
     filter(rank_date == latest_rank_date) |>
     dplyr::select(country_full, rank, total_points)
   
-  # --- Helper functions --------------------------------------------
+  # --- Helper functions inside simulate_afcon_2025 ------------------
   
-  # Get ranking info for a given team:
-  #  - Apply name_map if needed (e.g. "Ivory Coast" → "Côte d'Ivoire")
-  #  - Fetch its rank and total_points from ranks_latest
+  # Get ranking info for a given team
   get_team_rank <- function(team_name) {
     canonical_name <- if (team_name %in% names(name_map)) {
       name_map[[team_name]]
@@ -150,17 +184,15 @@ simulate_afcon_2025 <- function(model        = rf_fit,
     c(rank = rec$rank[1], total_points = rec$total_points[1])
   }
   
-  # Build feature vector for a match between team1 (home) and team2 (away).
-  # This mirrors the structure used in modeling.R:
-  #   - rank_diff   : away_rank - home_rank
-  #   - points_diff : home_points - away_points
-  #   - is_afcon    : TRUE for AFCON tournament
-  #   - is_qual     : FALSE (we treat this as main tournament)
-  #   - is_friendly : FALSE
-  #   - year        : year_for_model
+  # Build feature vector for a match (home = team1, away = team2)
+  # Mirrors predictors used in 04_modeling.R:
+  #   rank_diff, points_diff, is_afcon, is_qual, is_friendly,
+  #   year, h2h_matches_before_home, h2h_goal_diff_before_home,
+  #   h2h_home_winrate_before
   build_match_features <- function(team1, team2) {
     home <- get_team_rank(team1)
     away <- get_team_rank(team2)
+    h2h  <- get_h2h_features(team1, team2)
     
     tibble(
       rank_diff   = away["rank"] - home["rank"],
@@ -168,22 +200,21 @@ simulate_afcon_2025 <- function(model        = rf_fit,
       is_afcon    = TRUE,
       is_qual     = FALSE,
       is_friendly = FALSE,
-      year        = year_for_model
+      year        = year_for_model,
+      h2h_matches_before_home  = h2h$h2h_matches_before_home,
+      h2h_goal_diff_before_home = h2h$h2h_goal_diff_before_home,
+      h2h_home_winrate_before  = h2h$h2h_home_winrate_before
     )
   }
   
-  # Predict outcome probabilities for a match:
-  # returns a named vector with classes (H, D, A) and their probabilities.
+  # Predict outcome probabilities for a match
   predict_match_prob <- function(team1, team2) {
     feats <- build_match_features(team1, team2)
     probs <- predict(model, newdata = feats, type = "prob")[1, ]
     probs
   }
   
-  # Simulate a single group-stage match based on predicted probabilities.
-  #  - We sample an outcome (H/D/A) according to the model probabilities.
-  #  - We award points: win = 3, draw = 1, loss = 0
-  #  - We approximate goal difference as +1 / -1 / 0 for simplicity.
+  # Simulate a single group-stage match
   simulate_match <- function(team1, team2) {
     probs <- predict_match_prob(team1, team2)
     outcome <- sample(c("H", "D", "A"), size = 1, prob = as.numeric(probs))
@@ -203,8 +234,7 @@ simulate_afcon_2025 <- function(model        = rf_fit,
     }
   }
   
-  # Generate all pairwise fixtures within a group (round-robin).
-  # For N teams, this creates N*(N-1)/2 matches.
+  # Generate all pairwise fixtures within a group (round-robin)
   group_fixtures <- function(teams) {
     if (length(teams) < 2) {
       stop("group_fixtures called with < 2 teams: ",
@@ -216,11 +246,7 @@ simulate_afcon_2025 <- function(model        = rf_fit,
       rlang::set_names(c("team1", "team2"))
   }
   
-  # Simulate an entire group:
-  #  1. Generate fixtures
-  #  2. Simulate each match
-  #  3. Aggregate points and goal difference
-  #  4. Rank teams within the group
+  # Simulate an entire group
   simulate_group <- function(group_name, teams) {
     fixtures <- group_fixtures(teams)
     
@@ -246,10 +272,7 @@ simulate_afcon_2025 <- function(model        = rf_fit,
     standings
   }
   
-  # Simulate one knockout round (e.g., R16, QF, SF, Final).
-  # pairs_df should have columns team1, team2.
-  #  - We sample match result (H/D/A).
-  #  - If draw, we break tie using only H vs A probabilities (no draws).
+  # Simulate one knockout round (R16, QF, SF, Final)
   simulate_knockout_round <- function(pairs_df) {
     winners <- sapply(seq_len(nrow(pairs_df)), function(i) {
       t1 <- pairs_df$team1[i]
@@ -269,7 +292,6 @@ simulate_afcon_2025 <- function(model        = rf_fit,
   }
   
   # 4. Group stage ---------------------------------------------------
-  # Simulate all groups independently and combine into one table.
   group_names <- names(afcon_groups)
   group_list <- lapply(seq_along(afcon_groups), function(i) {
     gname <- group_names[i]
@@ -279,9 +301,6 @@ simulate_afcon_2025 <- function(model        = rf_fit,
   group_results <- bind_rows(group_list)
   
   # 5. Qualifiers for knockout stage --------------------------------
-  # Standard AFCON-style logic:
-  #  - Top 2 from each group qualify automatically (6 groups → 12 teams)
-  #  - Best 4 third-placed teams qualify as well → total 16 teams
   auto_qualified <- group_results |> filter(position <= 2)
   third_placed   <- group_results |>
     filter(position == 3) |>
@@ -291,8 +310,6 @@ simulate_afcon_2025 <- function(model        = rf_fit,
   knockout_teams <- bind_rows(auto_qualified, best_thirds)
   
   # 6. Seeding + Round of 16 pairings -------------------------------
-  # We seed teams based on group performance (points, then GD),
-  # then pair 1 vs 16, 2 vs 15, ..., 8 vs 9.
   seeded <- knockout_teams |>
     arrange(desc(points), desc(gd)) |>
     mutate(seed = row_number())
@@ -311,7 +328,7 @@ simulate_afcon_2025 <- function(model        = rf_fit,
   r16        <- simulate_knockout_round(round_of_16_pairs)
   r16_w      <- r16$winner
   
-  # Quarter-finals: (1 vs 2), (3 vs 4), (5 vs 6), (7 vs 8) among R16 winners
+  # Quarter-finals
   qf_pairs <- tibble(
     team1 = r16_w[c(1, 3, 5, 7)],
     team2 = r16_w[c(2, 4, 6, 8)]
@@ -319,7 +336,7 @@ simulate_afcon_2025 <- function(model        = rf_fit,
   qf        <- simulate_knockout_round(qf_pairs)
   qf_w      <- qf$winner
   
-  # Semi-finals: (1 vs 2), (3 vs 4) among QF winners
+  # Semi-finals
   sf_pairs <- tibble(
     team1 = qf_w[c(1, 3)],
     team2 = qf_w[c(2, 4)]
@@ -327,17 +344,15 @@ simulate_afcon_2025 <- function(model        = rf_fit,
   sf        <- simulate_knockout_round(sf_pairs)
   sf_w      <- sf$winner
   
-  # Final: winner SF1 vs winner SF2
+  # Final
   final_pair <- tibble(team1 = sf_w[1], team2 = sf_w[2])
   final_res  <- simulate_knockout_round(final_pair)
   champion   <- final_res$winner[1]
   
   # 8. Return output -------------------------------------------------
   if (!return_details) {
-    # Only return the champion (team name)
     return(champion)
   } else {
-    # Return a list containing full tournament details
     return(list(
       champion          = champion,
       final_pair        = final_pair,
@@ -367,18 +382,17 @@ afcon_groups <- list(
 sapply(afcon_groups, length)
 
 # -------------------------------------------------------------------
-# Run one simulation using the RF model from models/
-# 'ranks' must already be loaded into the environment (from
-# feature_engineer.R or another script).
+# Run one simulation
+# 'ranks' must already be loaded into the environment
+# (from 03_feature_engineering.R or separately).
 # -------------------------------------------------------------------
 res <- simulate_afcon_2025(
-  # model defaults to rf_fit loaded from models/
   ranks_df     = ranks,
   afcon_groups = afcon_groups,
   seed         = 123
 )
 
-# Inspect the winner and group standings in the console
+# Inspect
 res$champion
 res$group_results
 
@@ -388,6 +402,7 @@ saveRDS(res, file = "results/afcon_2025_sim_seed123.rds")
 cat("Simulation result saved to results/afcon_2025_sim_seed123.rds\n")
 
 print("Simulating AFCON 2025: Done")
+
 
 
 

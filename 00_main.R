@@ -12,6 +12,7 @@
 ##   2. Load required libraries
 ##   3. Execute the full pipeline:
 ##        - EDA
+##        - (optional) web-scraping
 ##        - Feature engineering
 ##        - Model training
 ##        - Simulation
@@ -23,7 +24,7 @@
 ## Note:
 ##   The heavy web-scraping script is NOT executed by default.
 ##   The project uses pre-scraped data stored in /data to keep
-##   runtime under one minute.
+##   runtime low.
 ##
 ## Authors:
 ##   Chadwa Khmissi (HQQ4WD)
